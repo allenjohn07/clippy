@@ -1,0 +1,19 @@
+# SwiftPM / Xcode
+.build/
+.swiftpm/
+*.xcodeproj/
+xcuserdata/
+DerivedData/
+
+# App bundle output
+build/
+
+# Never commit clipboard history
+*.db
+*.db-wal
+*.db-shm
+
+# Claude Code personal overrides
+.claude/settings.local.json
+
+.DS_Store
