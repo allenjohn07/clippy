@@ -29,7 +29,7 @@ jobs:
         run: ./scripts/build-app.sh --zip
 
       - name: Upload app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Clippy-${{ github.sha }}
           path: build/Clippy.zip
