@@ -24,6 +24,10 @@ enum Config {
     ]
 
     static var databaseURL: URL {
+        // Lets the end-to-end tests use a throwaway database instead of your real history.
+        if let override = ProcessInfo.processInfo.environment["CLIPPY_DB_PATH"], !override.isEmpty {
+            return URL(fileURLWithPath: override)
+        }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("clippy", isDirectory: true)
                    .appendingPathComponent("history.db")

@@ -21,6 +21,15 @@ final class Controller {
 
     init(store: ClipboardStore) {
         self.store = store
+        // Get each app's accessibility info ready as soon as it comes to the front.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { note in
+            if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
+                FocusInspector.prepare(app)
+            }
+        }
+        if let front = NSWorkspace.shared.frontmostApplication { FocusInspector.prepare(front) }
     }
 
     // Returns true to let the event through, false to swallow it.
@@ -128,15 +137,18 @@ final class Controller {
 
     private func resolveOpening() {
         guard state == .opening else { return }
-        if let target = FocusInspector.currentPasteTarget() {
-            state = .popup
-            selected = 0
-            clearArmed = false
-            panel.show(items: store.items, selected: selected, target: target)
-        } else {
-            // Nowhere to paste: give ⌘⇧V back to the app.
-            state = .idle
-            postKeystroke(flags: [.maskCommand, .maskShift])
+        FocusInspector.currentPasteTarget { [weak self] target in
+            guard let self, self.state == .opening else { return }
+            if let target {
+                self.state = .popup
+                self.selected = 0
+                self.clearArmed = false
+                self.panel.show(items: self.store.items, selected: self.selected, target: target)
+            } else {
+                // Nowhere to paste: give ⌘⇧V back to the app.
+                self.state = .idle
+                self.postKeystroke(flags: [.maskCommand, .maskShift])
+            }
         }
     }
 

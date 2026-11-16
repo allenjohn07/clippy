@@ -18,28 +18,95 @@ enum FocusInspector {
 
     /// Cached "Paste" menu item per app, so we don't walk the menu bar on every press.
     private static var pasteItemCache: [pid_t: AXUIElement] = [:]
+    /// Per-process cache of "is this a Chromium-based app?".
+    private static var chromiumCache: [pid_t: Bool] = [:]
+    /// Apps that never exposed a focused element even after waiting; don't wait for them again.
+    private static var unresponsive: Set<pid_t> = []
 
-    /// Returns a target if pasting makes sense right now, `nil` otherwise.
-    static func currentPasteTarget() -> PasteTarget? {
-        guard let frontApp = NSWorkspace.shared.frontmostApplication else { return nil }
+    /// How long to wait for a Chromium app to build its accessibility tree the first time.
+    private static let chromiumWarmup: TimeInterval = 1.5
+
+    /// Called whenever an app comes to the front, so its accessibility info is ready
+    /// by the time the user presses ⌘⇧V.
+    static func prepare(_ app: NSRunningApplication) {
+        let appEl = AXUIElementCreateApplication(app.processIdentifier)
+        // Electron apps (VS Code, Slack, …) only expose their AX tree when asked.
+        AXUIElementSetAttributeValue(appEl, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        // Chrome/Edge/Brave build theirs only once an assistive app sets this, which takes ~1–2s.
+        // Only set it on Chromium apps: other apps don't need it.
+        if isChromium(app) {
+            AXUIElementSetAttributeValue(appEl, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        }
+    }
+
+    /// Calls `completion` (on the main thread) with a target if pasting makes sense right
+    /// now, or `nil` otherwise. Usually immediate; may wait up to `chromiumWarmup` the
+    /// first time a Chromium app is used.
+    static func currentPasteTarget(completion: @escaping (PasteTarget?) -> Void) {
+        guard let frontApp = NSWorkspace.shared.frontmostApplication else { completion(nil); return }
         let pid = frontApp.processIdentifier
         let appEl = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(appEl, 0.3)
-        // Electron apps (VS Code, Slack, …) only expose their AX tree when asked.
-        AXUIElementSetAttributeValue(appEl, "AXManualAccessibility" as CFString, kCFBooleanTrue)
 
+        if let el = focusedElement(appEl) {
+            completion(target(for: el, app: appEl, pid: pid))
+            return
+        }
+        // Nothing focused yet. A Chromium app may still be building its accessibility tree.
+        guard isChromium(frontApp), !unresponsive.contains(pid) else {
+            completion(fallbackTarget(app: appEl, pid: pid))
+            return
+        }
+        prepare(frontApp)
+        let deadline = Date().addingTimeInterval(chromiumWarmup)
+        func poll() {
+            if let el = focusedElement(appEl) {
+                completion(target(for: el, app: appEl, pid: pid))
+            } else if Date() >= deadline {
+                unresponsive.insert(pid)
+                completion(fallbackTarget(app: appEl, pid: pid))
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: poll)
+            }
+        }
+        poll()
+    }
+
+    private static func focusedElement(_ appEl: AXUIElement) -> AXUIElement? {
+        // Ask the app directly first: Chrome doesn't answer the system-wide query.
+        if let el = element(appEl, kAXFocusedUIElementAttribute) { return el }
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, 0.3)
-        let focused = element(system, kAXFocusedUIElementAttribute)
-                   ?? element(appEl, kAXFocusedUIElementAttribute)
+        return element(system, kAXFocusedUIElementAttribute)
+    }
 
-        // 1. A recognisable text input has focus.
-        // 2. Otherwise, trust the app: if its Edit ▸ Paste item is enabled, it accepts a paste.
-        let editable = focused.map(isEditable) ?? false
-        guard editable || pasteMenuEnabled(app: appEl, pid: pid) else { return nil }
-
-        guard let el = focused else { return PasteTarget(inputFrame: nil, caret: nil) }
+    /// 1. A recognisable text input has focus → place the popup by it.
+    /// 2. Otherwise, trust the app: if its Edit ▸ Paste item is enabled, it accepts a paste.
+    private static func target(for el: AXUIElement, app: AXUIElement, pid: pid_t) -> PasteTarget? {
+        guard isEditable(el) || pasteMenuEnabled(app: app, pid: pid) else { return nil }
         return PasteTarget(inputFrame: elementFrame(el), caret: caretRect(el))
+    }
+
+    /// No focused element known: open at the mouse if the app can paste at all.
+    private static func fallbackTarget(app: AXUIElement, pid: pid_t) -> PasteTarget? {
+        pasteMenuEnabled(app: app, pid: pid) ? PasteTarget(inputFrame: nil, caret: nil) : nil
+    }
+
+    private static func isChromium(_ app: NSRunningApplication) -> Bool {
+        let pid = app.processIdentifier
+        if let cached = chromiumCache[pid] { return cached }
+        var result = false
+        if let frameworks = app.bundleURL?.appendingPathComponent("Contents/Frameworks").path,
+           let items = try? FileManager.default.contentsOfDirectory(atPath: frameworks) {
+            // e.g. "Google Chrome Framework.framework", "Brave Browser Framework.framework",
+            // "Microsoft Edge Framework.framework", "Electron Framework.framework"
+            result = items.contains { name in
+                ["Chrome", "Chromium", "Electron", "Edge Framework", "Browser Framework"]
+                    .contains { name.contains($0) }
+            }
+        }
+        chromiumCache[pid] = result
+        return result
     }
 
     // MARK: - Editable check

@@ -103,17 +103,22 @@ swift test           # run the tests
 | `StatusMenu.swift` / `LoginItem.swift` | Menu bar icon and launch at login |
 | `Config.swift` | Settings and key codes |
 
-### Manual test checklist
+### End-to-end tests
 
-These depend on real apps and permissions, so the automated tests can't cover them:
+`./scripts/e2e.sh` drives a real Clippy with real keystrokes and mouse clicks. It opens test windows and a Chromium + Chrome window (via Playwright), and checks popup placement, pasting, Esc, clicks, clearing, and that history survives a restart.
 
-- [ ] ⌘V pastes instantly with no popup
-- [ ] ⌘⇧V in a text field opens the popup under the field; near the bottom of the screen it opens above
-- [ ] Works in Safari/Chrome inputs, Notes, VS Code, Terminal
-- [ ] ⌘⇧V on the desktop / with nothing focused does nothing
-- [ ] Clicking outside closes it; clicking an item pastes it
-- [ ] Clear history asks twice, then empties the list
-- [ ] History is still there after quitting and reopening
+```bash
+cd Tests/E2E/browser && npm install && npx playwright install chromium && cd -   # once
+./scripts/e2e.sh
+```
+
+- It **takes over your keyboard and mouse for about a minute.** Don't touch anything while it runs.
+- Your clipboard is saved and restored, a running Clippy is paused and restarted, and a throwaway database is used.
+- Your terminal app needs Accessibility permission.
+- It stops by itself if a test window isn't in front, so stray keystrokes never land in other apps.
+- It doesn't run in CI, because GitHub's Mac runners can't grant Accessibility permission.
+
+Still worth a quick manual check before a release: VS Code / Slack (Electron), Terminal, Notes, and Safari.
 
 ### Releasing
 

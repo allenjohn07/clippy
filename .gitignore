@@ -17,3 +17,6 @@ build/
 .claude/settings.local.json
 
 .DS_Store
+
+# E2E browser deps
+Tests/E2E/browser/node_modules/

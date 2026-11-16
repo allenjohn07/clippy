@@ -20,6 +20,8 @@
 import Cocoa
 import ApplicationServices
 
+setvbuf(stdout, nil, _IOLBF, 0)      // line-buffered logs, even when piped to a file
+
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)   // no Dock icon, no menu bar
 
