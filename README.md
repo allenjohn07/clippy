@@ -1,10 +1,6 @@
-<p align="center">
-  <img src="assets/logo.png" width="128" height="128" alt="Clippy icon">
-</p>
+# <img src="assets/logo.png" width="44" height="44" alt="" align="absmiddle"> Clippy
 
-<h1 align="center">Clippy</h1>
-
-<p align="center">A tiny clipboard history for macOS. Press <b>⌘⇧V</b> in any text field to pick something you copied earlier.</p>
+A tiny clipboard history for macOS. Press **⌘⇧V** in any text field to pick something you copied earlier.
 
 - **⌘V** still pastes normally. Clippy never gets in the way.
 - **⌘⇧V** opens a small popup just below the input box you're typing in (or above it, if the box is at the bottom of the screen).
