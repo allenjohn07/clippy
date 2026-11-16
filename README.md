@@ -1,6 +1,10 @@
-# Clippy
+<p align="center">
+  <img src="assets/logo.png" width="128" height="128" alt="Clippy icon">
+</p>
 
-A tiny clipboard history for macOS. Press **⌘⇧V** in any text field to pick something you copied earlier.
+<h1 align="center">Clippy</h1>
+
+<p align="center">A tiny clipboard history for macOS. Press <b>⌘⇧V</b> in any text field to pick something you copied earlier.</p>
 
 - **⌘V** still pastes normally. Clippy never gets in the way.
 - **⌘⇧V** opens a small popup just below the input box you're typing in (or above it, if the box is at the bottom of the screen).
@@ -102,6 +106,8 @@ swift test           # run the tests
 | `HistoryDatabase.swift` | SQLite storage |
 | `StatusMenu.swift` / `LoginItem.swift` | Menu bar icon and launch at login |
 | `Config.swift` | Settings and key codes |
+
+The app icon and README logo are drawn by `scripts/make-icon.swift`. Run `swift scripts/make-icon.swift` after changing it.
 
 ### End-to-end tests
 
