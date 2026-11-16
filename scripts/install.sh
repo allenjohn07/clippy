@@ -6,7 +6,8 @@ cd "$(dirname "$0")/.."
 
 ./scripts/build-app.sh
 
-DEST="$HOME/Applications"
+# Install where Clippy already lives (you may have moved it to /Applications), else ~/Applications.
+if [[ -d /Applications/Clippy.app ]]; then DEST="/Applications"; else DEST="$HOME/Applications"; fi
 mkdir -p "$DEST"
 # Quit a running copy and wait until it has really exited. Opening too soon makes
 # macOS fail with "_LSOpenURLsWithCompletionHandler() failed with error -600".

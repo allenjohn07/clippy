@@ -4,23 +4,28 @@ A tiny clipboard history for macOS. Press **⌘⇧V** in any text field to pick 
 
 - **⌘V** still pastes normally. Clippy never gets in the way.
 - **⌘⇧V** opens a small popup just below the input box you're typing in (or above it, if the box is at the bottom of the screen).
-- History is saved locally in SQLite and survives restarts. Nothing ever leaves your Mac.
+- Saves **text, images** (screenshots, "Copy Image") and **YouTube links** (shown with their thumbnail and title).
+- A **preview** beside the list shows the highlighted item larger.
+- **Passwords and keys are never saved.**
+- History is saved locally in SQLite and survives restarts.
 - No Dock icon, no windows. Just a small menu bar icon.
 
-[![CI](https://github.com/allenjohn07/clippy/actions/workflows/ci.yml/badge.svg)](https://github.com/allenjohn07/clippy/actions/workflows/ci.yml)
+[![CI](https://github.com/allenjohn07/clippy/actions/workflows/ci.yml/badge.svg)](https://github.com/allenjohn07/clippy/actions/workflows/ci.yml) [![CodeQL](https://github.com/allenjohn07/clippy/actions/workflows/codeql.yml/badge.svg)](https://github.com/allenjohn07/clippy/actions/workflows/codeql.yml)
 
 ## Using it
 
 | Key / action | What it does |
 |---|---|
 | **⌘⇧V** | Open the popup (only where you can paste) |
-| **V**, **↓**, **↑** | Move the selection |
-| **1–9** or **click** an item | Paste that item |
+| **V**, **↓**, **↑**, or scroll | Move through the list (9 rows at a time, scroll for more) |
+| **1–9** or **click** an item | Paste one of the visible rows |
 | **Return** | Paste the highlighted item |
 | **Esc**, any other key, or click elsewhere | Close the popup |
 | **⌫** or click **Clear history** (twice to confirm) | Delete all history |
 
-The menu bar icon has **Launch at Login**, **Clear History…**, and **Quit**.
+The footer and the menu bar icon show how much is saved (e.g. "245 items · 1.2 MB"). The menu bar icon also has **Launch at Login**, **Clear History…**, and **Quit**.
+
+Images paste into anything that accepts pictures (Notes, Pages, Mail, Slack, TextEdit in rich-text mode), not into plain-text fields.
 
 ## Install
 
@@ -64,9 +69,16 @@ Then remove Clippy from **System Settings → Privacy & Security → Accessibili
 ## Privacy
 
 - History lives in `~/Library/Application Support/clippy/history.db`. The file is readable only by your user account.
-- Only the newest **1,000** items are kept. Older ones are deleted automatically.
-- Copies from password managers that mark content as concealed (1Password, Bitwarden, etc.) are **not** recorded.
-- No network access. Nothing is sent anywhere.
+- Only the newest **1,000** items (and at most **100 images**, each up to 25 MB) are kept. Older ones are deleted automatically.
+- **Never saved:**
+  - copies that password managers mark as private;
+  - anything copied while a password manager is in front (Passwords, Keychain Access, 1Password, Bitwarden, LastPass, Dashlane, KeePassXC, …);
+  - text that looks like a password or key, e.g. `Tr0ub4dor&3`, `ghp_…` tokens, `sk-…` keys, AWS keys, JWTs and private keys;
+  - blank copies (spaces or invisible characters only).
+- If something private does show up, **Clear history** removes everything.
+- **Network:** the only time Clippy goes online is when you copy a YouTube link. It then fetches that video's thumbnail and title from YouTube, with no cookies. Nothing else is ever sent anywhere.
+
+Security checks (CodeQL, secret scanning, Dependabot) and how to report a problem: see [SECURITY.md](SECURITY.md).
 
 ## Battery & performance
 
@@ -77,7 +89,8 @@ Clippy is idle almost all the time. It checks whether the clipboard changed twic
 - **Secure input:** while a password field is focused, or when Terminal/iTerm's "Secure Keyboard Entry" is on, macOS blocks all keyboard monitoring, so ⌘⇧V can't work there.
 - **Finder** counts as "somewhere you can paste" (it pastes files), so the popup opens there, but pasting text does nothing.
 - **Rebuilding** changes the app's signature, so macOS may ask you to re-allow Accessibility after an update. If that happens, remove Clippy from the Accessibility list and add it again.
-- Text only. Images and files aren't recorded yet.
+- Files copied in Finder aren't recorded (images copied as pictures are).
+- The password check is a best guess. It may skip an unusual-looking ID now and then, and it can't catch a password that looks like a normal word.
 
 ## Development
 

@@ -1,5 +1,5 @@
 // e2ectl — tiny CLI used by the browser (Playwright) tests and scripts/e2e.sh.
-//   e2ectl key cmd+shift+v | click X Y | popup PID | front | copy TEXT
+//   e2ectl key cmd+shift+v | click X Y | popup PID | front | copy TEXT | copy-image PATH
 //   e2ectl save-clipboard PATH | restore-clipboard PATH
 import Cocoa
 
@@ -24,6 +24,13 @@ case "front":
     print(NSWorkspace.shared.frontmostApplication?.localizedName ?? "")
 case "copy":
     E2E.copy(args[1])
+case "copy-image":
+    guard let data = FileManager.default.contents(atPath: args[1]),
+          let rep = NSBitmapImageRep(data: data) ?? NSImage(data: data)?.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:)),
+          let png = rep.representation(using: .png, properties: [:]) else {
+        FileHandle.standardError.write("can't read image \(args[1])\n".data(using: .utf8)!); exit(1)
+    }
+    E2E.copyImage(png: png)
 case "save-clipboard":
     E2E.saveClipboard(to: args[1])
 case "restore-clipboard":

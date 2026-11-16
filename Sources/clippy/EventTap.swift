@@ -13,7 +13,7 @@ enum EventTap {
     static func install(for controller: Controller) -> Bool {
         let types: [CGEventType] = [.keyDown, .keyUp, .flagsChanged,
                                     .leftMouseDown, .leftMouseUp,
-                                    .rightMouseDown, .otherMouseDown]
+                                    .rightMouseDown, .otherMouseDown, .scrollWheel]
         let mask = types.reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
 
         guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap,

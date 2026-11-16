@@ -74,7 +74,8 @@ final class Harness: NSObject, NSApplicationDelegate {
         bottomWindow.level = .floating
         scroll = NSScrollView(frame: NSRect(x: 20, y: 15, width: 400, height: 70))
         textView = NSTextView(frame: scroll.bounds)
-        textView.isRichText = false
+        textView.isRichText = true
+        textView.importsGraphics = true     // so pasted images show up as attachments
         scroll.documentView = textView
         scroll.borderType = .bezelBorder
         bottomWindow.contentView!.addSubview(scroll)
@@ -83,7 +84,7 @@ final class Harness: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func heightFor(items n: Int) -> CGFloat { CGFloat(min(n, 10)) * 26 + 12 + 30 }
+    func heightFor(items n: Int) -> CGFloat { CGFloat(min(n, 9)) * 26 + 12 + 30 }
 
     // MARK: Helpers
 
@@ -198,6 +199,10 @@ final class Harness: NSObject, NSApplicationDelegate {
                   "popup=\(p) field=\(f)")
             check("popup is left-aligned with the field", abs(p.minX - f.minX) < 2, "popup=\(p) field=\(f)")
             check("popup shows 3 items + footer", abs(p.height - expectedHeight) < 1, "height=\(p.height)")
+            if waitFor(2.5, { E2E.previewFrame(pid: clippyPid) != nil }), let pv = E2E.previewFrame(pid: clippyPid) {
+                check("preview panel sits beside the list", !pv.intersects(p) && abs(pv.minY - p.minY) < 2,
+                      "preview=\(pv) popup=\(p)")
+            } else { check("preview panel appears", false) }
         } else { check("popup opens", false) }
 
         key("2")
@@ -231,7 +236,8 @@ final class Harness: NSObject, NSApplicationDelegate {
         clearField()
         _ = openPopup()
         let tw = cgRect(topWindow.contentView!)
-        E2E.click(CGPoint(x: tw.maxX - 60, y: tw.maxY - 20))     // empty part of the window
+        // Top-left of the window: above the field, so clear of both the list and the preview.
+        E2E.click(CGPoint(x: tw.minX + 15, y: tw.minY + 15))
         check("clicking outside closes the popup", popupClosed())
         check("clicking outside pastes nothing", fieldText.isEmpty, "field=\(fieldText)")
 
@@ -246,6 +252,7 @@ final class Harness: NSObject, NSApplicationDelegate {
         let s = cgRect(scroll)
         E2E.click(CGPoint(x: s.midX, y: s.midY))
         waitFor { self.bottomWindow.firstResponder === self.textView }
+        wait(0.3)   // macOS takes a moment to report the new focus to other apps; people are never this fast
         textView.string = ""
         if let p = openPopup() {
             check("popup flips above the input", p.maxY <= s.minY && s.minY - p.maxY < 20, "popup=\(p) input=\(s)")
@@ -279,6 +286,94 @@ final class Harness: NSObject, NSApplicationDelegate {
         key("1")
         check("newest item is still first", waitFor { self.fieldText == saved.first },
               "field=\(fieldText) expected=\(saved.first ?? "")")
+
+        print("Things that should not be saved")
+        let before = history()
+        E2E.copy("  \n\u{200B} "); wait(0.9)
+        E2E.copy("Tr0ub4dor&3"); wait(0.9)
+        E2E.copy("ghp_" + String(repeating: "a1B2", count: 9)); wait(0.9)
+        check("blank and password-like copies are not saved", history() == before,
+              "new rows: \(history().filter { !before.contains($0) })")
+        E2E.copy("hello world"); wait(0.9)
+        check("normal text copied right after is saved", waitFor { self.history().first == "hello world" },
+              "first=\(history().first ?? "")")
+
+        print("Images")
+        E2E.copyImage(png: E2E.makePNG(width: 200, height: 100, color: .systemRed)); wait(1.0)
+        check("copied image is saved", waitFor {
+            self.db("SELECT kind || ':' || width || 'x' || height FROM clips ORDER BY last_used_at DESC LIMIT 1;")
+                == ["image:200x100"] }, "got \(db("SELECT kind FROM clips ORDER BY last_used_at DESC LIMIT 1;"))")
+        let s2 = cgRect(scroll)
+        E2E.click(CGPoint(x: s2.midX, y: s2.midY))
+        waitFor { self.bottomWindow.firstResponder === self.textView }
+        wait(0.3)
+        textView.string = ""
+        if let p = openPopup() {
+            if waitFor(2.5, { E2E.previewFrame(pid: clippyPid) != nil }), let pv = E2E.previewFrame(pid: clippyPid) {
+                check("image preview shows beside the list", !pv.intersects(p), "preview=\(pv) popup=\(p)")
+            } else { check("image preview appears", false) }
+        } else { check("popup opens for image test", false) }
+        key("1")
+        check("pasting puts the image into the document",
+              waitFor { self.textView.textStorage?.containsAttachments ?? false })
+        check("preview closes with the popup", waitFor { E2E.previewFrame(pid: clippyPid) == nil })
+
+        print("YouTube (needs internet)")
+        let yt = "https://youtu.be/dQw4w9WgXcQ"
+        E2E.copy(yt)
+        let fetched = waitFor(15) {
+            self.db("SELECT kind || ':' || (title IS NOT NULL) || ':' || (thumb IS NOT NULL) FROM clips WHERE content = '\(yt)';")
+                == ["youtube:1:1"]
+        }
+        check("YouTube link gets its title and thumbnail", fetched,
+              "row=\(db("SELECT kind, title IS NOT NULL, thumb IS NOT NULL FROM clips WHERE content = '\(yt)';"))")
+
+        print("Scrolling past 9 items")
+        var h = history()
+        check("enough history to scroll", h.count > 9, "count=\(h.count)")
+        focusField()
+        if let p = openPopup() {
+            check("popup shows 9 rows at most", abs(p.height - heightFor(items: h.count)) < 1, "height=\(p.height)")
+        }
+        for _ in 0..<10 { key("down") }
+        key("return")
+        check("↓ ten times then Return pastes the 11th item", waitFor { self.fieldText == h[10] },
+              "field=\(fieldText) expected=\(h[10])")
+        check("popup closes", popupClosed())
+
+        h = history()
+        clearField()
+        if let p = openPopup() {
+            E2E.scroll(pixels: -3 * 26, at: CGPoint(x: p.midX, y: p.minY + 60))
+            wait(0.3)
+            key("1")
+            check("trackpad scroll by 3 rows, then 1 pastes the 4th item", waitFor { self.fieldText == h[3] },
+                  "field=\(fieldText) expected=\(h[3])")
+        } else { check("popup opens for scroll test", false) }
+        _ = popupClosed()
+
+        h = history()
+        clearField()
+        if let p = openPopup() {
+            E2E.scroll(pixels: -5 * 26, at: CGPoint(x: p.midX, y: p.minY + 60))
+            wait(0.3)
+            E2E.click(CGPoint(x: p.minX + 120, y: p.minY + 6 + 13))       // first visible row
+            check("clicking the top row after scrolling pastes the 6th item", waitFor { self.fieldText == h[5] },
+                  "field=\(fieldText) expected=\(h[5])")
+        } else { check("popup opens for scroll+click test", false) }
+        _ = popupClosed()
+
+        h = history()
+        clearField()
+        if let p = openPopup() {
+            E2E.scroll(pixels: -3 * 26, at: CGPoint(x: p.midX, y: p.minY + 60))
+            E2E.scroll(pixels: 3 * 26, at: CGPoint(x: p.midX, y: p.minY + 60))
+            wait(0.3)
+            key("1")
+            check("scrolling back up returns to the top", waitFor { self.fieldText == h[0] },
+                  "field=\(fieldText) expected=\(h[0])")
+        }
+        _ = popupClosed()
 
         print("Clear history")
         clearField()

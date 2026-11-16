@@ -10,6 +10,7 @@ final class Controller {
 
     let store: ClipboardStore
     let panel = PopupPanel()
+    let preview = PreviewPanel()
     var tap: CFMachPort?
 
     private var state: State = .idle
@@ -18,6 +19,7 @@ final class Controller {
     private var swallowV = false       // swallow leftover V events until V is released
     private var swallowMouseUp = false // swallow the mouse-up of a click we consumed
     private var clearArmed = false     // "Clear history" needs a second click/⌫ to confirm
+    private var scrollAccumulator: CGFloat = 0  // leftover trackpad scroll, in points
 
     init(store: ClipboardStore) {
         self.store = store
@@ -30,6 +32,25 @@ final class Controller {
             }
         }
         if let front = NSWorkspace.shared.frontmostApplication { FocusInspector.prepare(front) }
+
+        // A YouTube title/thumbnail arrived while the popup is open: redraw it.
+        store.onChange = { [weak self] in
+            guard let self, self.state == .popup else { return }
+            self.panel.refresh(items: self.store.items, footerInfo: self.footerInfo)
+            self.updatePreview()
+        }
+    }
+
+    private var footerInfo: String {
+        PopupLayout.footerInfo(count: store.items.count, bytes: store.storageBytes)
+    }
+
+    /// Shows the highlighted item in the preview panel beside the list.
+    private func updatePreview() {
+        guard state == .popup, store.items.indices.contains(selected) else { preview.orderOut(nil); return }
+        let item = store.items[selected]
+        let bytes = item.kind == .image ? store.imageData(for: item)?.count : nil
+        preview.show(item, imageBytes: bytes, beside: panel.frame)
     }
 
     // Returns true to let the event through, false to swallow it.
@@ -48,6 +69,8 @@ final class Controller {
         case .leftMouseUp:
             if swallowMouseUp { swallowMouseUp = false; return false }
             return true
+        case .scrollWheel:
+            return scrollWheel(event)
         default:
             return true
         }
@@ -87,8 +110,8 @@ final class Controller {
             case KeyCode.escape:                cancel()
             case KeyCode.delete:                requestClear()
             default:
-                if let idx = KeyCode.digits[key], idx < store.items.count {
-                    commit(idx)
+                if let row = KeyCode.digits[key], row < PopupLayout.visibleRows(itemCount: store.items.count) {
+                    commit(panel.scrollOffset + row)     // 1–9 = the rows currently visible
                 } else {
                     // Any other key closes the popup and goes through as normal.
                     cancel()
@@ -119,6 +142,10 @@ final class Controller {
     private func mouseDown() -> Bool {
         guard state == .popup else { return true }
         let point = NSEvent.mouseLocation
+        if preview.isVisible && preview.frame.contains(point) {
+            swallowMouseUp = true       // clicking the preview does nothing (and doesn't close)
+            return false
+        }
         if panel.frame.contains(point) {
             swallowMouseUp = true
             switch panel.hit(at: point) {
@@ -133,6 +160,26 @@ final class Controller {
         return true
     }
 
+    /// Trackpad / mouse wheel over the popup scrolls the list.
+    private func scrollWheel(_ event: CGEvent) -> Bool {
+        guard state == .popup, panel.frame.contains(NSEvent.mouseLocation) else { return true }
+        let continuous = event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
+        let delta = continuous
+            ? CGFloat(event.getDoubleValueField(.scrollWheelEventPointDeltaAxis1))
+            : CGFloat(event.getIntegerValueField(.scrollWheelEventDeltaAxis1)) * Config.rowHeight
+        // Positive delta = content moves down = show earlier items.
+        scrollAccumulator -= delta
+        let rows = Int(scrollAccumulator / Config.rowHeight)
+        if rows != 0 {
+            scrollAccumulator -= CGFloat(rows) * Config.rowHeight
+            panel.scroll(byRows: rows)
+            selected = panel.selectedIndex
+            disarmClear()
+            updatePreview()
+        }
+        return false
+    }
+
     // MARK: - Actions
 
     private func resolveOpening() {
@@ -143,7 +190,10 @@ final class Controller {
                 self.state = .popup
                 self.selected = 0
                 self.clearArmed = false
-                self.panel.show(items: self.store.items, selected: self.selected, target: target)
+                self.scrollAccumulator = 0
+                self.panel.show(items: self.store.items, selected: self.selected, target: target,
+                                footerInfo: self.footerInfo)
+                self.updatePreview()
             } else {
                 // Nowhere to paste: give ⌘⇧V back to the app.
                 self.state = .idle
@@ -158,6 +208,7 @@ final class Controller {
         selected = (selected + delta + n) % n
         panel.select(selected)
         disarmClear()
+        updatePreview()
     }
 
     /// First press arms the footer ("click again to confirm"); the second clears everything.
@@ -182,16 +233,16 @@ final class Controller {
         clearArmed = false
         swallowV = vDown      // if V is still physically held, ignore its repeats
         panel.orderOut(nil)
+        preview.orderOut(nil)
     }
 
     private func cancel() { finish() }
 
     private func commit(_ index: Int) {
         guard index < store.items.count else { finish(); return }
-        let text = store.items[index]
+        let item = store.items[index]
         finish()
-        store.setClipboard(text)
-        postKeystroke(flags: .maskCommand)
+        if store.paste(item) { postKeystroke(flags: .maskCommand) }
     }
 
     /// Posts a synthetic V keystroke with the given modifiers (⌘V = paste).

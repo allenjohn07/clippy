@@ -71,9 +71,57 @@ struct PopupLayoutTests {
         #expect(second.contains(NSRect(origin: o, size: size)))
     }
 
-    @Test(arguments: [0, 1, 5, 10])
-    func heightGrowsWithItems(count: Int) {
-        let h = PopupLayout.height(itemCount: count)
-        #expect(h == CGFloat(count) * Config.rowHeight + 12 + Config.footerHeight)
+    @Test(arguments: [0, 1, 5, 9, 10, 500])
+    func heightShowsAtMostNineRows(count: Int) {
+        let rows = min(count, 9)
+        #expect(PopupLayout.height(itemCount: count) == CGFloat(rows) * Config.rowHeight + 12 + Config.footerHeight)
+    }
+
+    @Test func scrollingDownKeepsSelectionAtBottomRow() {
+        // 20 items, 9 visible: selecting row 9 (the 10th) scrolls by one.
+        #expect(PopupLayout.scrollOffset(keeping: 8, current: 0, itemCount: 20) == 0)
+        #expect(PopupLayout.scrollOffset(keeping: 9, current: 0, itemCount: 20) == 1)
+        #expect(PopupLayout.scrollOffset(keeping: 19, current: 0, itemCount: 20) == 11)
+    }
+
+    @Test func scrollingUpKeepsSelectionAtTopRow() {
+        #expect(PopupLayout.scrollOffset(keeping: 5, current: 10, itemCount: 20) == 5)
+        #expect(PopupLayout.scrollOffset(keeping: 0, current: 11, itemCount: 20) == 0)   // wrap to top
+    }
+
+    @Test func selectionAlreadyVisibleDoesNotScroll() {
+        #expect(PopupLayout.scrollOffset(keeping: 7, current: 3, itemCount: 20) == 3)
+    }
+
+    @Test func scrollOffsetIsClamped() {
+        #expect(PopupLayout.clampOffset(-4, itemCount: 20) == 0)
+        #expect(PopupLayout.clampOffset(50, itemCount: 20) == 11)
+        #expect(PopupLayout.clampOffset(3, itemCount: 5) == 0)          // fits on screen: no scrolling
+    }
+
+    @Test func previewGoesRightOfTheList() {
+        let list = NSRect(x: 100, y: 400, width: 420, height: 200)
+        let o = PopupLayout.previewOrigin(listFrame: list, previewSize: NSSize(width: 340, height: 150), visible: screen)
+        #expect(o.x == list.maxX + 8)
+        #expect(o.y + 150 == list.maxY)                 // top-aligned
+    }
+
+    @Test func previewFlipsLeftNearTheRightEdge() {
+        let list = NSRect(x: 1000, y: 400, width: 420, height: 200)
+        let o = PopupLayout.previewOrigin(listFrame: list, previewSize: NSSize(width: 340, height: 150), visible: screen)
+        #expect(o.x + 340 <= list.minX)
+    }
+
+    @Test func previewStaysOnScreen() {
+        let list = NSRect(x: 100, y: 10, width: 420, height: 100)   // tall preview, list near bottom
+        let o = PopupLayout.previewOrigin(listFrame: list, previewSize: NSSize(width: 340, height: 300), visible: screen)
+        #expect(o.y >= screen.minY)
+    }
+
+    @Test func footerInfoText() {
+        #expect(PopupLayout.footerInfo(count: 1, bytes: 0).hasPrefix("1 item · "))
+        let s = PopupLayout.footerInfo(count: 245, bytes: 1_200_000)
+        #expect(s.hasPrefix("245 items · "))
+        #expect(s.contains("MB"))
     }
 }

@@ -49,16 +49,35 @@ enum E2E {
         }
     }
 
+    /// Trackpad-style scroll at `p`. Negative pixels = scroll down the list.
+    static func scroll(pixels: Int32, at p: CGPoint) {
+        let src = CGEventSource(stateID: .hidSystemState)
+        CGEvent(mouseEventSource: src, mouseType: .mouseMoved, mouseCursorPosition: p, mouseButton: .left)?
+            .post(tap: .cghidEventTap)
+        usleep(30_000)
+        let e = CGEvent(scrollWheelEvent2Source: src, units: .pixel, wheelCount: 1,
+                        wheel1: pixels, wheel2: 0, wheel3: 0)
+        e?.location = p
+        e?.post(tap: .cghidEventTap)
+        usleep(30_000)
+    }
+
     // MARK: Popup detection
 
-    /// On-screen frame (CG coordinates) of Clippy's popup, if it's showing.
-    static func popupFrame(pid: pid_t) -> CGRect? {
+    /// On-screen frame of Clippy's popup list, if it's showing.
+    static func popupFrame(pid: pid_t) -> CGRect? { windowFrame(pid: pid, width: 420) }   // Config.popupWidth
+
+    /// On-screen frame of the preview panel beside the list, if it's showing.
+    static func previewFrame(pid: pid_t) -> CGRect? { windowFrame(pid: pid, width: 340) } // PreviewView.width
+
+    /// Frame (CG coordinates) of an on-screen window owned by `pid` with the given width.
+    static func windowFrame(pid: pid_t, width wanted: CGFloat) -> CGRect? {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID)
                 as? [[String: Any]] else { return nil }
         for w in list {
             guard (w[kCGWindowOwnerPID as String] as? Int).map(pid_t.init) == pid,
                   let b = w[kCGWindowBounds as String] as? [String: CGFloat],
-                  let width = b["Width"], abs(width - 420) < 1 else { continue }   // Config.popupWidth
+                  let width = b["Width"], abs(width - wanted) < 1 else { continue }
             return CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0, width: width, height: b["Height"] ?? 0)
         }
         return nil
@@ -73,6 +92,25 @@ enum E2E {
         item.setString(text, forType: .string)
         for t in extraTypes { item.setData(Data(), forType: NSPasteboard.PasteboardType(t)) }
         pb.writeObjects([item])
+    }
+
+    static func copyImage(png: Data) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setData(png, forType: .png)
+    }
+
+    /// A solid-colour PNG for tests.
+    static func makePNG(width: Int, height: Int, color: NSColor) -> Data {
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
+                                   bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                   colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        color.setFill()
+        NSRect(x: 0, y: 0, width: width, height: height).fill()
+        NSGraphicsContext.restoreGraphicsState()
+        return rep.representation(using: .png, properties: [:])!
     }
 
     /// Saves every item/type on the clipboard so it can be put back after the tests.

@@ -60,8 +60,12 @@ else
     echo "==> Browser tests skipped (run: cd Tests/E2E/browser && npm install && npx playwright install chromium)"
 fi
 
-echo "==> Restarting Clippy (phase B: persistence + clear)"
+echo "==> Restarting Clippy (phase B: persistence, scrolling, clear)"
 stop_clippy
+# Add 20 older entries so there's more than one screenful to scroll through.
+for i in $(seq 1 20); do
+    sqlite3 "$DB" "INSERT OR IGNORE INTO clips (content, created_at, last_used_at) VALUES ('older item $i', $i, $i);"
+done
 start_clippy || exit 1
 "$WORK/harness" B "$CLIPPY_PID" "$DB" || STATUS=1
 
