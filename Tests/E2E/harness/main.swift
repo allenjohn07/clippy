@@ -167,6 +167,13 @@ final class Harness: NSObject, NSApplicationDelegate {
         return s.split(separator: "\n").map(String.init)
     }
 
+    /// Database + write-ahead log size in bytes (what the footer reports).
+    func diskSize() -> Int {
+        [dbPath, dbPath + "-wal"].reduce(0) { total, path in
+            total + ((try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? 0)
+        }
+    }
+
     func history() -> [String] { db("SELECT content FROM clips ORDER BY last_used_at DESC;") }
 
     let expectedHeight: CGFloat = 3 * 26 + 12 + 30   // 3 rows + padding + footer
@@ -318,6 +325,15 @@ final class Harness: NSObject, NSApplicationDelegate {
               waitFor { self.textView.textStorage?.containsAttachments ?? false })
         check("preview closes with the popup", waitFor { E2E.previewFrame(pid: clippyPid) == nil })
 
+        print("Image file copied in Finder")
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("clippy-e2e-\(UUID().uuidString).png")
+        try? E2E.makePNG(width: 300, height: 150, color: .systemBlue).write(to: file)
+        E2E.copyFile(file); wait(1.0)
+        check("Finder image file is saved as a picture", waitFor {
+            self.db("SELECT kind || ':' || width || 'x' || height FROM clips ORDER BY last_used_at DESC LIMIT 1;")
+                == ["image:300x150"] }, "got \(db("SELECT kind, content FROM clips ORDER BY last_used_at DESC LIMIT 1;"))")
+        try? FileManager.default.removeItem(at: file)
+
         print("YouTube (needs internet)")
         let yt = "https://youtu.be/dQw4w9WgXcQ"
         E2E.copy(yt)
@@ -329,6 +345,8 @@ final class Harness: NSObject, NSApplicationDelegate {
               "row=\(db("SELECT kind, title IS NOT NULL, thumb IS NOT NULL FROM clips WHERE content = '\(yt)';"))")
 
         print("Scrolling past 9 items")
+        // Text on top, so the rows these checks paste into a text field are all text (not images).
+        for i in 1...6 { E2E.copy("scroll text \(i)"); wait(0.9) }
         var h = history()
         check("enough history to scroll", h.count > 9, "count=\(h.count)")
         focusField()
@@ -381,10 +399,13 @@ final class Harness: NSObject, NSApplicationDelegate {
             key("delete")
             wait(0.4)
             check("first ⌫ only asks for confirmation", popup() != nil)
+            let sizeBefore = diskSize()
             E2E.click(CGPoint(x: p.minX + 120, y: p.maxY - 15))      // footer
             check("confirming closes the popup", popupClosed())
             check("database is empty", waitFor { self.db("SELECT COUNT(*) FROM clips;") == ["0"] },
                   "count=\(db("SELECT COUNT(*) FROM clips;"))")
+            check("clearing shrinks the files on disk", waitFor { self.diskSize() < 100_000 },
+                  "before=\(sizeBefore) after=\(diskSize())")
         } else { check("popup opens for clear test", false) }
         wait(0.3)
         check("clearing pastes nothing", fieldText.isEmpty, "field=\(fieldText)")

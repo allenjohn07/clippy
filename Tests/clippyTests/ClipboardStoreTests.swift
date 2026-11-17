@@ -105,6 +105,49 @@ struct ClipboardStoreTests {
         #expect(store.imageData(for: store.items[0]) == png)
     }
 
+    @Test func imageFileCopiedInFinderSavesThePicture() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("clippy-tests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let db = try #require(HistoryDatabase(url: dir.appendingPathComponent("history.db")))
+        let store = ClipboardStore(database: db)
+        let pb = NSPasteboard(name: NSPasteboard.Name("clippy-test-\(UUID().uuidString)"))
+        defer { pb.releaseGlobally() }
+
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 120, pixelsHigh: 80, bitsPerSample: 8,
+                                   samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                   colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        let file = dir.appendingPathComponent("Holiday photo.png")
+        try rep.representation(using: .png, properties: [:])!.write(to: file)
+
+        // Finder puts the file URL, and sometimes the file name as text too.
+        pb.clearContents()
+        pb.writeObjects([file as NSURL])
+        pb.setString("Holiday photo.png", forType: .string)
+        store.capture(from: pb, frontApp: "com.apple.finder")
+
+        #expect(store.items.count == 1)
+        #expect(store.items.first?.kind == .image)
+        #expect(store.items.first?.pixelSize == CGSize(width: 120, height: 80))
+        #expect(store.items.first?.thumbnail != nil)
+    }
+
+    @Test func nonImageFileFromFinderIsNotAnImage() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("clippy-tests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let db = try #require(HistoryDatabase(url: dir.appendingPathComponent("history.db")))
+        let store = ClipboardStore(database: db)
+        let pb = NSPasteboard(name: NSPasteboard.Name("clippy-test-\(UUID().uuidString)"))
+        defer { pb.releaseGlobally() }
+        let file = dir.appendingPathComponent("notes.txt")
+        try "hi".write(to: file, atomically: true, encoding: .utf8)
+        pb.clearContents()
+        pb.writeObjects([file as NSURL])
+        store.capture(from: pb, frontApp: "com.apple.finder")
+        #expect(!store.items.contains { $0.kind == .image })
+    }
+
     @Test func browserCopyImageKeepsTheImageNotTheURL() throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("clippy-tests-\(UUID().uuidString)", isDirectory: true)

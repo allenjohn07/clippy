@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import SQLite3
 @testable import clippy
 
 /// Each test gets its own throwaway database file.
@@ -138,6 +139,60 @@ struct HistoryDatabaseTests {
         #expect(row.kind == "youtube")
         #expect(row.title == "A video")
         #expect(row.thumbnail == Data([7, 7]))
+    }
+
+    @Test func clearingShrinksTheFilesOnDisk() throws {
+        let (db, dir) = try makeDatabase(); defer { try? FileManager.default.removeItem(at: dir) }
+        let blob = Data((0..<400_000).map { UInt8($0 % 251) })
+        for i in 0..<8 {
+            db.recordImage(png: blob + Data([UInt8(i)]), thumbnail: nil, width: 1, height: 1, hash: "h\(i)")
+        }
+        #expect(db.fileSize() > 3_000_000, "size=\(db.fileSize())")
+        db.clearAll()
+        #expect(db.fileSize() < 100_000, "size after clear=\(db.fileSize())")
+    }
+
+    @Test func openingShrinksALargeLeftoverLog() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("clippy-tests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("history.db")
+        let wal = url.path + "-wal"
+
+        // Like an old Clippy: WAL mode with no size limit, lots written then deleted.
+        // Keep this connection open (never checkpointed) so the big log stays on disk.
+        var old: OpaquePointer?
+        #expect(sqlite3_open(url.path, &old) == SQLITE_OK)
+        defer { sqlite3_close(old) }
+        sqlite3_exec(old, """
+            PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;
+            CREATE TABLE clips (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT NOT NULL UNIQUE,
+              created_at REAL NOT NULL, last_used_at REAL NOT NULL, use_count INTEGER NOT NULL DEFAULT 1);
+            WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < 3000)
+            INSERT INTO clips (content, created_at, last_used_at) SELECT printf('%0500d', i), i, i FROM n;
+            DELETE FROM clips;
+            """, nil, nil, nil)
+        let before = (try? FileManager.default.attributesOfItem(atPath: wal)[.size] as? Int) ?? 0
+        #expect(before > 1_000_000, "test setup should leave a big log, got \(before)")
+
+        let db = try #require(HistoryDatabase(url: url))
+        let after = (try? FileManager.default.attributesOfItem(atPath: wal)[.size] as? Int) ?? 0
+        print("leftover log: \(before) bytes before opening, \(after) after")
+        #expect(after < 100_000, "log before open=\(before) after open=\(after)")
+        #expect(db.fileSize() < 300_000)
+    }
+
+    @Test func trimmingOldItemsGivesSpaceBack() throws {
+        let (db, dir) = try makeDatabase(); defer { try? FileManager.default.removeItem(at: dir) }
+        let blob = Data((0..<400_000).map { UInt8($0 % 251) })
+        for i in 0..<8 {
+            db.recordImage(png: blob + Data([UInt8(i)]), thumbnail: nil, width: 1, height: 1, hash: "h\(i)",
+                           at: date(Double(i)))
+        }
+        let full = db.fileSize()
+        db.pruneImages(keep: 1)
+        #expect(db.fileSize() < full / 3, "before=\(full) after=\(db.fileSize())")
     }
 
     @Test func fileIsPrivateToUser() throws {

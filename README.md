@@ -12,6 +12,8 @@ A tiny clipboard history for macOS. Press **⌘⇧V** in any text field to pick 
 
 [![CI](https://github.com/allenjohn07/clippy/actions/workflows/ci.yml/badge.svg)](https://github.com/allenjohn07/clippy/actions/workflows/ci.yml) [![CodeQL](https://github.com/allenjohn07/clippy/actions/workflows/codeql.yml/badge.svg)](https://github.com/allenjohn07/clippy/actions/workflows/codeql.yml)
 
+Built with [Claude Code](https://claude.com/claude-code).
+
 ## Using it
 
 | Key / action | What it does |
@@ -143,6 +145,10 @@ Push a version tag. GitHub Actions runs the tests, builds a universal (Apple Sil
 git tag v1.0.0
 git push origin v1.0.0
 ```
+
+## Credits
+
+Clippy was made with [Claude Code](https://claude.com/claude-code), Anthropic's AI coding assistant: the app, tests, icon, CI and release workflows, and this README.
 
 ## License
 

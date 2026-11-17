@@ -94,6 +94,14 @@ enum E2E {
         pb.writeObjects([item])
     }
 
+    /// Puts a file on the clipboard the way Finder's Copy does.
+    static func copyFile(_ url: URL) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.writeObjects([url as NSURL])
+        pb.setString(url.lastPathComponent, forType: .string)
+    }
+
     static func copyImage(png: Data) {
         let pb = NSPasteboard.general
         pb.clearContents()

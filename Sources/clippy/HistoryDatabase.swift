@@ -41,6 +41,8 @@ final class HistoryDatabase {
 
         let schema = """
         PRAGMA journal_mode = WAL;
+        PRAGMA journal_size_limit = 524288;  -- shrink the write-ahead log back to ≤512 KB after checkpoints
+        PRAGMA wal_autocheckpoint = 200;     -- checkpoint every ~800 KB instead of ~4 MB
         CREATE TABLE IF NOT EXISTS clips (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             content      TEXT    NOT NULL UNIQUE,
@@ -55,6 +57,8 @@ final class HistoryDatabase {
             sqlite3_close(db)
             return nil
         }
+        // Shrink a write-ahead log left large by older versions (or by the upgrade above).
+        sqlite3_exec(db, "PRAGMA wal_checkpoint(TRUNCATE);", nil, nil, nil)
     }
 
     deinit { sqlite3_close(db) }
@@ -65,8 +69,14 @@ final class HistoryDatabase {
 
     // MARK: - Schema upgrades
 
-    /// Adds columns introduced after 1.0 to databases created by older versions.
+    /// Adds columns introduced after 1.0 to databases created by older versions, and turns on
+    /// incremental vacuum so deleted items give their space back.
     private func migrate() -> Bool {
+        if pragmaInt("auto_vacuum") != 2 {   // 2 = INCREMENTAL; changing it needs a one-time VACUUM
+            guard sqlite3_exec(db, "PRAGMA auto_vacuum = INCREMENTAL; VACUUM;", nil, nil, nil) == SQLITE_OK else {
+                return false
+            }
+        }
         let existing = Set(columns())
         let wanted: [(String, String)] = [
             ("kind", "TEXT NOT NULL DEFAULT 'text'"),
@@ -82,6 +92,19 @@ final class HistoryDatabase {
             }
         }
         return true
+    }
+
+    private func pragmaInt(_ name: String) -> Int {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA \(name);", -1, &stmt, nil) == SQLITE_OK else { return -1 }
+        defer { sqlite3_finalize(stmt) }
+        return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int64(stmt, 0)) : -1
+    }
+
+    /// After deleting rows: hand the freed pages back to the file system and
+    /// shrink the write-ahead log, so the size on disk actually goes down.
+    private func reclaimSpace() {
+        sqlite3_exec(db, "PRAGMA incremental_vacuum; PRAGMA wal_checkpoint(TRUNCATE);", nil, nil, nil)
     }
 
     /// Column names of the clips table.
@@ -187,6 +210,7 @@ final class HistoryDatabase {
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int64(stmt, 1, id)
         sqlite3_step(stmt)
+        if sqlite3_changes(db) > 0 { reclaimSpace() }
     }
 
     /// Keeps only the newest `keep` entries.
@@ -200,6 +224,7 @@ final class HistoryDatabase {
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int(stmt, 1, Int32(max(keep, 0)))
         sqlite3_step(stmt)
+        if sqlite3_changes(db) > 0 { reclaimSpace() }
     }
 
     /// Keeps only the newest `keep` images.
@@ -213,11 +238,13 @@ final class HistoryDatabase {
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int(stmt, 1, Int32(max(keep, 0)))
         sqlite3_step(stmt)
+        if sqlite3_changes(db) > 0 { reclaimSpace() }
     }
 
-    /// Deletes all history.
+    /// Deletes all history and shrinks the files on disk to almost nothing.
     func clearAll() {
-        if sqlite3_exec(db, "DELETE FROM clips; VACUUM;", nil, nil, nil) != SQLITE_OK {
+        let sql = "DELETE FROM clips; VACUUM; PRAGMA wal_checkpoint(TRUNCATE);"
+        if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
             print("clippy: clear failed: \(errorMessage)")
         }
     }

@@ -54,6 +54,12 @@ final class ClipboardStore {
         if types.contains(where: { Config.ignoredPasteboardTypes.contains($0) }) { return }
         if let app = frontApp, Config.passwordApps.contains(app) { return }
 
+        // An image *file* copied in Finder: save the picture, not the file name.
+        if let file = Self.imageFileURL(on: pb) {
+            addImage(fromFile: file)
+            return
+        }
+
         let hasImage = Config.imageTypes.contains { types.contains($0.rawValue) }
         if let text = pb.string(forType: .string), TextFilter.isMeaningful(text),
            !(hasImage && TextFilter.isSingleURL(text)) {      // browser "Copy Image" also puts the URL
@@ -75,8 +81,34 @@ final class ClipboardStore {
     }
 
     private func addImage(from pb: NSPasteboard) {
-        guard let database else { return }   // images only make sense with storage
-        guard let (png, rep) = Self.pngData(from: pb), png.count <= Config.maxImageBytes else { return }
+        guard let (png, rep) = Self.pngData(from: pb) else { return }
+        addImage(png: png, rep: rep)
+    }
+
+    private func addImage(fromFile url: URL) {
+        // Don't even read files that are far too large.
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard size <= Config.maxImageBytes, let data = try? Data(contentsOf: url) else { return }
+        if url.pathExtension.lowercased() == "png", let rep = NSBitmapImageRep(data: data) {
+            addImage(png: data, rep: rep)
+        } else if let image = NSImage(data: data), let tiff = image.tiffRepresentation,
+                  let rep = NSBitmapImageRep(data: tiff),
+                  let png = rep.representation(using: .png, properties: [:]) {
+            addImage(png: png, rep: rep)
+        }
+    }
+
+    /// The first file URL on the pasteboard that points to an image, if any.
+    static func imageFileURL(on pb: NSPasteboard) -> URL? {
+        let urls = pb.readObjects(forClasses: [NSURL.self],
+                                  options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        return urls.first { url in
+            (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType)?.conforms(to: .image) ?? false
+        }
+    }
+
+    private func addImage(png: Data, rep: NSBitmapImageRep) {
+        guard let database, png.count <= Config.maxImageBytes else { return }   // images need storage
         let hash = SHA256.hash(data: png).map { String(format: "%02x", $0) }.joined()
         let thumb = Self.thumbnailJPEG(from: rep)
         guard let id = database.recordImage(png: png, thumbnail: thumb, width: rep.pixelsWide,
